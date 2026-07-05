@@ -1,3 +1,10 @@
+use crate::{error, info};
+
+use std::{
+    io::{BufRead, BufReader, Write},
+    net::{TcpListener, TcpStream},
+};
+
 pub enum Status {
     OK,
     BadRequest,
@@ -21,7 +28,7 @@ impl Response {
     }
 
     pub fn ok(body: &str) -> Self {
-        Response::new(Status::BadRequest, body)
+        Response::new(Status::OK, body)
     }
 
     pub fn new(status: Status, body: &str) -> Self {
@@ -46,5 +53,69 @@ impl Response {
             self.body
         )
         .to_string()
+    }
+}
+
+pub struct Server<'a> {
+    listener: TcpListener,
+    request_handler: Box<dyn 'a + Fn(String, String) -> Response>,
+}
+
+impl<'a> Server<'a> {
+    pub fn new(port: u16, handler: impl Fn(String, String) -> Response + 'a) -> Self {
+        let ip = format!("0.0.0.0:{}", port);
+        let listener = match TcpListener::bind(ip) {
+            Ok(listener) => listener,
+            Err(err) => {
+                error!("failed to start server: {}", err);
+                std::process::exit(1);
+            }
+        };
+        Self {
+            listener,
+            request_handler: Box::new(handler),
+        }
+    }
+
+    pub fn serve(&self) {
+        for stream in self.listener.incoming() {
+            match stream {
+                Ok(mut stream) => {
+                    let response = self.routing(&stream);
+                    match stream.write_all(response.to_string().as_bytes()) {
+                        Err(err) => error!("failed to send response: {}", err),
+                        Ok(_) => (),
+                    }
+                }
+                Err(err) => error!("connection failed: {}", err),
+            };
+        }
+    }
+
+    fn validate_request(&self, stream: &TcpStream) -> Result<(String, String), String> {
+        let reader = BufReader::new(stream);
+        let header = reader.lines().next();
+        match header {
+            Some(Ok(header)) => {
+                let mut entries = header.split_whitespace();
+                match (entries.next(), entries.next()) {
+                    (Some(method), Some(route)) => Ok((route.to_string(), method.to_string())),
+                    (None, _) => Err("request is missing method type!".to_string()),
+                    (_, None) => Err("request is missing route!".to_string()),
+                }
+            }
+            Some(Err(err)) => Err(format!("invalid request: {}", err)),
+            None => Err("Missing header!".to_string()),
+        }
+    }
+
+    fn routing(&self, stream: &TcpStream) -> Response {
+        match self.validate_request(stream) {
+            Ok((route, method)) => {
+                info!("request: {} {}", method, route);
+                (self.request_handler)(route, method)
+            }
+            Err(msg) => Response::bad(&msg),
+        }
     }
 }
