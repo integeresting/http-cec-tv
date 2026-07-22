@@ -31,7 +31,7 @@ fn main() {
                 // navigating to right HDMI output since my FireTV
                 // refuses to preserve the last selected input source
                 cec.exec_user_control(CecUserControlCode::PowerOnFunction)?;
-                std::thread::sleep(std::time::Duration::from_millis(1000));
+                std::thread::sleep(std::time::Duration::from_millis(3000));
                 cec.exec_user_control(CecUserControlCode::InputSelect)?;
                 std::thread::sleep(std::time::Duration::from_millis(800));
                 cec.exec_user_control(CecUserControlCode::Down)?;
