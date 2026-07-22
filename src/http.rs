@@ -1,6 +1,7 @@
 use crate::{error, info};
 
 use std::{
+    fmt::Display,
     io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
 };
@@ -16,6 +17,19 @@ pub struct Response {
     status_code: u16,
     reason_phrase: String,
     body: String,
+}
+
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n\r\n{}",
+            self.status_code,
+            self.reason_phrase,
+            self.body.len(),
+            self.body
+        )
+    }
 }
 
 impl Response {
@@ -43,16 +57,6 @@ impl Response {
             status_code,
             body: body.to_string(),
         }
-    }
-    pub fn to_string(&self) -> String {
-        format!(
-            "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n\r\n{}",
-            self.status_code,
-            self.reason_phrase,
-            self.body.len(),
-            self.body
-        )
-        .to_string()
     }
 }
 
@@ -82,9 +86,8 @@ impl<'a> Server<'a> {
             match stream {
                 Ok(mut stream) => {
                     let response = self.routing(&stream);
-                    match stream.write_all(response.to_string().as_bytes()) {
-                        Err(err) => error!("failed to send response: {}", err),
-                        Ok(_) => (),
+                    if let Err(err) = stream.write_all(response.to_string().as_bytes()) {
+                        error!("failed to send response: {}", err)
                     }
                 }
                 Err(err) => error!("connection failed: {}", err),

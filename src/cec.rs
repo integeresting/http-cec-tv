@@ -1,17 +1,11 @@
 use crate::info;
 use cec_linux::{
     CecDevice, CecLogAddrType, CecLogAddrs, CecLogicalAddress, CecModeFollower, CecModeInitiator,
-    CecOpcode, CecPrimDevType, VendorID, Version,
+    CecOpcode, CecPrimDevType, CecUserControlCode, VendorID, Version,
 };
 pub struct CecDev {
     pub device: CecDevice,
     log_addr: CecLogicalAddress,
-}
-
-pub enum CecCommand {
-    On,
-    Off,
-    Status,
 }
 
 impl CecDev {
@@ -34,44 +28,38 @@ impl CecDev {
             VendorID::NONE,
             Version::V1_4,
             "pi4".to_string().try_into().unwrap(),
-            &[CecPrimDevType::RECORD],
-            &[CecLogAddrType::RECORD],
+            &[CecPrimDevType::TUNER],
+            &[CecLogAddrType::TUNER],
         );
         device.set_log(log).expect("failed to set logical address");
         CecDev {
-            log_addr: CecLogicalAddress::Record1,
+            log_addr: CecLogicalAddress::Tuner1,
             device,
         }
     }
 
-    pub fn exec(&self, command: CecCommand) -> Result<String, String> {
+    pub fn exec(&self, command: CecOpcode) -> Result<(), String> {
         let (from, to) = (self.log_addr, CecLogicalAddress::Tv);
 
-        match command {
-            CecCommand::Status => return self.get_power_status(),
-            _ => (),
-        }
-
-        let op_code = match command {
-            CecCommand::On => CecOpcode::ImageViewOn,
-            CecCommand::Off => CecOpcode::Standby,
-            _ => panic!("covered before"),
-        };
-
-        let res = match self.device.transmit(from, to, op_code) {
-            Ok(_) => Ok(match op_code {
-                CecOpcode::ImageViewOn => "On",
-                CecOpcode::Standby => "Off",
-                _ => "Status unknown",
-            }
-            .to_string()),
+        match self.device.transmit(from, to, command) {
+            Ok(_) => Ok(()),
             Err(e) => Err(format!("transmitting opcode failed: {e:#?}").to_string()),
-        };
-
-        res
+        }
     }
 
-    fn get_power_status(&self) -> Result<String, String> {
+    pub fn exec_user_control(&self, command: CecUserControlCode) -> Result<(), String> {
+        let (from, to) = (self.log_addr, CecLogicalAddress::Tv);
+
+        match self
+            .device
+            .transmit_data(from, to, CecOpcode::UserControlPressed, &[command.into()])
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("transmitting user control command failed: {e:#?}").to_string()),
+        }
+    }
+
+    pub fn get_power_status(&self) -> Result<String, String> {
         let msg = self.device.request_data(
             self.log_addr,
             CecLogicalAddress::Tv,
