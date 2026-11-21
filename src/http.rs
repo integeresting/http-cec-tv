@@ -2,7 +2,7 @@ use crate::{error, info};
 
 use std::{
     fmt::Display,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Result, Write},
     net::{TcpListener, TcpStream},
 };
 
@@ -15,7 +15,7 @@ pub enum Status {
 
 pub struct Response {
     status_code: u16,
-    reason_phrase: String,
+    reason_phrase: &'static str,
     body: String,
 }
 
@@ -53,32 +53,28 @@ impl Response {
             Status::InternalServerError => (500, "Internal Server Error"),
         };
         Response {
-            reason_phrase: reason_phrase.to_string(),
+            reason_phrase,
             status_code,
             body: body.to_string(),
         }
     }
 }
 
+type RequestHandler<'a> = Box<dyn 'a + Fn(&str, &str) -> Result<Response>>;
+
 pub struct Server<'a> {
     listener: TcpListener,
-    request_handler: Box<dyn 'a + Fn(String, String) -> Response>,
+    request_handler: RequestHandler<'a>,
 }
 
 impl<'a> Server<'a> {
-    pub fn new(port: u16, handler: impl Fn(String, String) -> Response + 'a) -> Self {
+    pub fn new(port: u16, handler: impl Fn(&str, &str) -> Result<Response> + 'a) -> Result<Self> {
         let ip = format!("0.0.0.0:{}", port);
-        let listener = match TcpListener::bind(ip) {
-            Ok(listener) => listener,
-            Err(err) => {
-                error!("failed to start server: {}", err);
-                std::process::exit(1);
-            }
-        };
-        Self {
+        let listener = TcpListener::bind(ip)?;
+        Ok(Self {
             listener,
             request_handler: Box::new(handler),
-        }
+        })
     }
 
     pub fn serve(&self) {
@@ -95,7 +91,7 @@ impl<'a> Server<'a> {
         }
     }
 
-    fn validate_request(&self, stream: &TcpStream) -> Result<(String, String), String> {
+    fn validate_request(&self, stream: &TcpStream) -> std::result::Result<(String, String), &str> {
         let reader = BufReader::new(stream);
         let header = reader.lines().next();
         match header {
@@ -103,12 +99,12 @@ impl<'a> Server<'a> {
                 let mut entries = header.split_whitespace();
                 match (entries.next(), entries.next()) {
                     (Some(method), Some(route)) => Ok((route.to_string(), method.to_string())),
-                    (None, _) => Err("request is missing method type!".to_string()),
-                    (_, None) => Err("request is missing route!".to_string()),
+                    (None, _) => Err("request is missing method type!"),
+                    (_, None) => Err("request is missing route!"),
                 }
             }
-            Some(Err(err)) => Err(format!("invalid request: {}", err)),
-            None => Err("Missing header!".to_string()),
+            Some(Err(_)) => Err("Bad request (I/O error)"),
+            None => Err("Missing header!"),
         }
     }
 
@@ -116,9 +112,12 @@ impl<'a> Server<'a> {
         match self.validate_request(stream) {
             Ok((route, method)) => {
                 info!("request: {} {}", method, route);
-                (self.request_handler)(route, method)
+                match (self.request_handler)(&route, &method) {
+                    Ok(response) => response,
+                    Err(error) => Response::error(&error.to_string()),
+                }
             }
-            Err(msg) => Response::bad(&msg),
+            Err(msg) => Response::bad(msg),
         }
     }
 }
