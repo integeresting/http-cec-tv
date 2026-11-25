@@ -31,7 +31,7 @@ fn main() -> std::io::Result<()> {
         match (method, route) {
             ("GET", "/on") => (|| -> Result<(), Error> {
                 cec.exec_user_control(CecUserControlCode::PowerOnFunction)?;
-                std::thread::sleep(std::time::Duration::from_millis(1500));
+                std::thread::sleep(std::time::Duration::from_millis(2000));
                 cec.exec_user_control(CecUserControlCode::InputSelect)?;
                 std::thread::sleep(std::time::Duration::from_millis(800));
                 cec.exec_user_control(CecUserControlCode::Down)?;
